@@ -27,7 +27,7 @@ function Base.connect(::Type{MySQL5},
         error("Failed to connect to MySQL database")
     end
 
-    return MySQLDatabaseHandle(mysqlptr)
+    return MySQLDatabaseHandle(mysqlptr, 0)
 end
 
 function DBI.disconnect(db::MySQLDatabaseHandle)
@@ -42,8 +42,18 @@ function DBI.columninfo(db::MySQLDatabaseHandle,
 end
 
 function DBI.prepare(db::MySQLDatabaseHandle, sql::String)
-    status = mysql_query(db.ptr, sql)
-    return status
+    stmtptr = mysql_stmt_init(db.ptr)
+    if stmtptr == C_NULL
+        error("Failed to allocate statement handle")
+    end
+    status = mysql_stmt_prepare(stmtptr, sql)
+    db.status = status
+    if status != 0
+        msg = bytestring(mysql_stmt_error(stmtptr))
+        error(msg)
+    end
+    stmt = MySQLStatementHandle(db, stmtptr)
+    return stmt
 end
 
 function DBI.errcode(db::MySQLDatabaseHandle)
@@ -53,6 +63,17 @@ end
 # TODO: Make a copy here?
 function DBI.errstring(db::MySQLDatabaseHandle)
     return bytestring(mysql_error(db.ptr))
+end
+
+function DBI.execute(stmt::MySQLStatementHandle)
+    status = mysql_stmt_execute(stmt.ptr)
+    stmt.db.status = status
+    if status != 0
+        error(errstring(stmt.db))
+    else
+        stmt.executed += 1
+    end
+    return
 end
 
 function DBI.fetchall(stmt::MySQLStatementHandle)
@@ -68,13 +89,18 @@ function DBI.fetchrow(stmt::MySQLStatementHandle)
 end
 
 function DBI.finish(stmt::MySQLStatementHandle)
-    error("DBI API not fully implemented")
+    failed = mysql_stmt_close(stmt.ptr)
+    if failed
+        error("Failed to close MySQL statement handle")
+    end
+    return
 end
 
 function DBI.lastinsertid(db::MySQLDatabaseHandle)
     return int64(mysql_insert_id(db.ptr))
 end
 
+# TODO: Rename this
 function DBI.sqlescape(db::MySQLDatabaseHandle, dirtysql::String)
     to = Array(Uint8, 4 * length(dirtysql))
     writelength = mysql_real_escape_string(db.ptr,
