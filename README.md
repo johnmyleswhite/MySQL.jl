@@ -44,4 +44,4 @@ An interface to MySQL from Julia. Uses the C MySQL API and obeys the [DBI.jl pro
 
 # Systems
 
-* Works on OS X
+* Works on OS X and Linux
